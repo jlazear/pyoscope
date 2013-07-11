@@ -267,6 +267,8 @@ class HexReader(object):
         self.f.close()
 
     def init_data(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
         if 'columns' in self.header:
             names = self.header['columns']
         else:

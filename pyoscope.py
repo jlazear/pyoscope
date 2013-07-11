@@ -53,7 +53,8 @@ class PyOscopeStatic(object):
     passed to the reader. See reader.ReaderInterface for reader
     implementation notes.
     """
-    def __init__(self, f, reader=None, interactive=True, *args, **kwargs):
+    def __init__(self, f, reader=None, interactive=True, toolbar=True,
+                 *args, **kwargs):
         # Read in data
         if reader is None:
             self.reader = DefaultReader(f, *args, **kwargs)
@@ -67,17 +68,24 @@ class PyOscopeStatic(object):
         # e.g. if embedding in a separate program.
         self.interactive = interactive
 
-        self.fig = self._create_fig()
+        self.fig = self._create_fig(toolbar=toolbar)
+        self.mode = 'none'
+        self._plotdict = {'autoscalex': True,  # Autoscale is meaningless in
+                          'autoscaley': True,  # Static, but useful in RT
+                          'windowsize': None}
 
-    def _create_fig(self, plotsize=(6., 4.), dpi=100, tight=True):
-        # Automatically call tight_layout() on newly created figure
+    def _create_fig(self, plotsize=(6., 4.), dpi=100, tight=True,
+                    toolbar=True):
+        # autolayout: Automatically call tight_layout() on newly created figure
+        # toolbar: Whether or not to create toolbar attached to plot
         # Use context manager to prevent global settings from changing
-        rcdict = {'figure.autolayout': bool(tight)}
+        tb = 'toolbar2' if toolbar else 'None'
+        rcdict = {'figure.autolayout': bool(tight), 'toolbar': tb}
         with mpl.rc_context(rc=rcdict):
             if self.interactive:
                 # pyplot's figure() function creates Figure object and hooks it
                 # into MPL event loop
-                figname = 'PyOscopeStatic-' + hex(id(self))
+                figname = self.__class__.__name__ + '-' + hex(id(self))
                 fig = plt.figure(figname, figsize=plotsize, dpi=dpi)
             else:
                 # mpl.figure.Figure is a raw Figure object
@@ -91,7 +99,11 @@ class PyOscopeStatic(object):
         """
         Create grid of axes.
 
-        Slightly modified version of matplotlib.pyplot.subplots.
+        Slightly modified version of matplotlib.pyplot.subplots. See
+        subplots documentation for most arguments.
+
+        `fig` is the figure object in which the axes objects should be
+        created. If it is None, uses self.fig.
         """
         if isinstance(sharex, bool):
             if sharex:
@@ -277,7 +289,7 @@ class PyOscopeStatic(object):
             if isinstance(legend, StringTypes):
                 legendloc = legend
             else:
-                legendloc=None
+                legendloc = None
 
         # Find data series to be plotted
         if not oneD:
@@ -295,6 +307,9 @@ class PyOscopeStatic(object):
                     xname = 'x_{i}'.format(i=i)
                 xnames.append(xname)
                 newxs.append(newx)
+        else:
+            newxs = None
+            xnames = None
 
         newys = []
         ynames = []
@@ -311,6 +326,17 @@ class PyOscopeStatic(object):
             ynames.append(yname)
             newys.append(newy)
 
+        # Store these so we don't have to look them up again
+        self._plotdict['xs'] = newxs
+        self._plotdict['ys'] = newys
+        self._plotdict['xnames'] = xnames
+        self._plotdict['ynames'] = ynames
+        self._plotdict['xtrans'] = xtrans
+        self._plotdict['ytrans'] = ytrans
+        self._plotdict['oneD'] = oneD
+        self._plotdict['legendflag'] = legendflag
+        self._plotdict['legendloc'] = legendloc
+
         # Create axes for plotting
         if not oneD:
             lenx = len(xs) if splitx else 1
@@ -318,10 +344,11 @@ class PyOscopeStatic(object):
             lenx = 1
         leny = len(ys) if splity else 1
         self.axes = self._create_axes(leny, lenx, sharex=sharex,
-                                     sharey=sharey)
+                                      sharey=sharey)
 
         # Make plots in appropriate axes
-        self.lines = []
+        self.mode = 'plot'
+        self.lines = np.empty([lenx, leny], dtype='object')
         if oneD:
             for j, y in enumerate(newys):
                 yname = ynames[j]
@@ -330,7 +357,7 @@ class PyOscopeStatic(object):
                 ax = self.axes[rownum, 0]
                 line = self._plotyt(ax, y, yname, transform=ytran, *args,
                                     **kwargs)
-                self.lines.append(line)
+                self.lines[0, j] = line
                 if legendflag:
                     ax.legend(loc=legendloc)
         else:
@@ -345,7 +372,7 @@ class PyOscopeStatic(object):
                     ax = self.axes[rownum, colnum]
                     line = self._plotxy(ax, x, y, xname, yname, xtrans=xtran,
                                         ytrans=ytran, *args, **kwargs)
-                    self.lines.append(line)
+                    self.lines[i, j] = line
                     if legendflag:
                         ax.legend(loc=legendloc)
 
@@ -373,6 +400,7 @@ class PyOscopeStatic(object):
             ws = len(y)
         else:
             ws = min(len(y), windowsize)
+        self._plotdict['windowsize'] = windowsize
 
         if transform is None:
             transform = lambda x: x  # Identity function
@@ -408,6 +436,7 @@ class PyOscopeStatic(object):
             ws = len(y)
         else:
             ws = min(len(y), windowsize)
+        self._plotdict['windowsize'] = windowsize
 
         if xtrans is None:
             xtrans = lambda x: x  # Identity function
@@ -423,9 +452,220 @@ class PyOscopeStatic(object):
         line, = ax.plot(x, y, label=label, *args, **kwargs)
         return line
 
+    def clear(self):
+        """
+        Clears current plot.
+        """
+        self.fig.clear()
+        self.mode = 'none'
 
 
+class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
+    """
+    Object for plotting realtime data sets.
+
+    Requires the file `f` to be specified.
+
+    The `reader` may be a customized file reading class. It should not be
+    instantiated before being passed into PyOscopeRealtime.
+
+    The `interactive` flag indicates whether or not the built-in matplotlib
+    event handler loop should be used. You do want the built-in MPL loop to
+    be active if you are using PyOscopeRealtime interactively, but it must not
+    be active if the plot is to be embedded in an external application, which
+    will be running its own event handling loop (the two loops would collide).
+    Set to True (default) to use the built-in MPL loop, otherwise False.
+
+    The desired reader may be specified. The remaining arguments are
+    passed to the reader. See reader.ReaderInterface for reader
+    implementation notes.
+    """
+    def __init__(self, f, reader=None, interactive=True, *args, **kwargs):
+        PyOscopeStatic.__init__(self, f=f, reader=reader,
+                                interactive=interactive, toolbar=False,
+                                *args, **kwargs)
+
+        self._update_dict = {'none': self._pass,
+                             'plot': self._update_plot}
+
+        # Need to keep track of the backend, since not all backends support
+        # all update schemes
+        self._backend = plt.get_backend().lower()
+
+        # Create a threading.Event to control the thread's existence
+        self.stopped = threading.Event()  # Events default to False
+        self.stopped.set()
+
+        threading.Thread.__init__(self)
+        if self.interactive:
+            # Start the thread
+
+            self.stopped.clear()
+            try:
+                self.start()
+            except RuntimeError:
+                pass
+
+    def __del__(self):
+        self.stop()
+
+    def stop(self):
+        if self.interactive:
+            if self.isAlive():
+                self.stopped.set()
+                self.join()
+        self.close()
+
+    def close(self):
+        plt.close(self.fig)
+        self.reader.close()
+
+    def run(self):
+        while not self.stopped.isSet():
+            try:
+                self._update()
+                time.sleep(0.5)
+            except Exception as e:
+                self.stopped.set()
+                raise e
+        self.close()
+
+    def _update(self):
+        self.data = self.reader.update_data()
+        self._update_dict[self.mode]()
+
+    @staticmethod
+    def _pass():
+        pass
+
+    def _update_plot(self):
+        update_backend = {'macosx': self._update_plot_slow,
+                          'wxagg': self._update_plot_wxagg}
+
+        update_backend[self._backend]()
+
+    def _update_plot_slow(self):
+        """
+        Slowest and most platform-independent update step. Don't expect more
+        than a few fps out of this method!
+        """
+        oneD = self._plotdict['oneD']
+        xs = self._plotdict['xs']
+        ys = self._plotdict['ys']
+        xtrans = self._plotdict['xtrans']
+        ytrans = self._plotdict['ytrans']
+
+        if oneD:
+            for j, y in enumerate(ys):
+                ytran = ytrans[j]
+                line = self.lines[0, j]
+                self._update_line_slow(line, y=y, ytrans=ytran)
+        else:
+            for i, x in enumerate(xs):
+                for j, y in enumerate(ys):
+                    xtran = xtrans[i]
+                    ytran = ytrans[j]
+                    line = self.lines[i, j]
+                    self._update_line_slow(line, x, y, xtran, ytran)
+
+        self.autoscale_axes()
+        self.fig.canvas.draw()
+
+    def _update_line_slow(self, line, x=None, y=None,
+                          xtrans=None, ytrans=None):
+        """
+        Updates specified line with new data.
+        """
+        oneD = self._plotdict['oneD']
+        windowsize = self._plotdict['windowsize']
+        if windowsize is None:
+            ws = len(y)
+        else:
+            ws = min(len(y), windowsize)
+
+        if oneD:
+            newx = range(len(y))
+        else:
+            newx = xtrans(x)
+        newx = newx[-ws:]
+        newy = ytrans(y)[-ws:]
+
+        line.set_xdata(newx)
+        line.set_ydata(newy)
+
+    def _update_plot_wxagg(self):
+        self._update_plot_slow() #DELME
+
+    def autoscale_axes(self):
+        xflag = self._plotdict['autoscalex']
+        yflag = self._plotdict['autoscaley']
+
+        if (not xflag) and (not yflag):
+            return
+
+        for ax in self.axes.flatten():
+            xminax, xmaxax, yminax, ymaxax = ax.axis()
+            dxax = xmaxax - xminax
+            dyax = ymaxax - yminax
+            xmidax = xminax + dxax/2.
+            ymidax = yminax + dyax/2.
+
+            xmins = []
+            xmaxs = []
+            ymins = []
+            ymaxs = []
+
+            for line in ax.lines:
+                xmin, xmax, ymin, ymax = self._get_minmax(line)
+                xmins.append(xmin)
+                xmaxs.append(xmax)
+                ymins.append(ymin)
+                ymaxs.append(ymax)
+
+            xmin = min(xmins)
+            xmax = max(xmaxs)
+            ymin = min(ymins)
+            ymax = max(ymaxs)
+
+            xmincond = (xmin < xminax) or (xmin > xmidax)
+            xmaxcond = (xmax > xmaxax) or (xmax < xmidax)
+            ymincond = (ymin < yminax) or (ymin > ymidax)
+            ymaxcond = (ymax > ymaxax) or (ymax < ymidax)
+            cond = xmincond or xmaxcond or ymincond or ymaxcond
+            if cond:
+                dx = xmax - xmin
+                dy = ymax - ymin
+                newxmin = xmin - 0.1*dx
+                newxmax = xmax + 0.1*dx
+                newymin = ymin - 0.1*dx
+                newymax = ymax + 0.1*dx
+
+                if xflag:
+                    ax.set_xlim([newxmin, newxmax])
+                if yflag:
+                    ax.set_ylim([newymin, newymax])
 
 
+    @staticmethod
+    def _get_minmax(line):
+        xdata = line.get_xdata()
+        ydata = line.get_ydata()
+        xmin = min(xdata)
+        xmax = max(xdata)
+        ymin = min(ydata)
+        ymax = max(ydata)
+        return xmin, xmax, ymin, ymax
 
+    def autoscale(self, xflag=True, yflag=None):
+        """
+        Whether or not to autoscale the x or y axis.
 
+        If only `xflag` is specified, then applies to both x and y axes.
+
+        If both `xflag` and `yflag` are specified, then `xflag` sets the
+        x axis autoscaling and `yflag` sets the y axis autoscaling.
+        """
+        if yflag is None:
+            yflag = xflag
+        self._plotdict['autoscalex'] = bool(xflag)
+        self._plotdict['autoscaley'] = bool(yflag)
