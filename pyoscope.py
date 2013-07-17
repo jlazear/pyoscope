@@ -293,7 +293,9 @@ class PyOscopeStatic(object):
         and it will have `len(xs)*len(ys)` lines.
 
         If either `xs` or `ys` is None, then plots of the data versus their
-        index are created. The index is always on the x axis.
+        index are created. The index is always on the x axis. If both `xs`
+        and `ys` are None, then all of the possible data sets are plotted
+        against their indices.
 
         `xtrans` and `ytrans` are transformation functions for the x and y
         data, respectively. Their structure must match the structure of
@@ -309,8 +311,8 @@ class PyOscopeStatic(object):
         # Argument checking
         # oneD flag indicates if x axis will be indices
         if (xs is None) and (ys is None):
-            raise ValueError("Must specify at least one of xs or ys.")
-        elif (ys is None):
+            xs = [name for name in self.data.columns]
+        if (ys is None):
             ys = xs
             ytrans = xtrans
             oneD = True
