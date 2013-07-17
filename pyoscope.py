@@ -25,7 +25,7 @@ import matplotlib as mpl
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from collections import Iterable
-from types import StringTypes
+from types import StringTypes, MethodType
 import threading
 from functools import wraps
 from readers import DefaultReader
@@ -172,11 +172,11 @@ class PyOscopeStatic(object):
                 sharey = "none"
         share_values = ["all", "row", "col", "none"]
         if sharex not in share_values:
-            raise ValueError("sharex [%s] must be one of %s" % \
-                    (sharex, share_values))
+            raise ValueError("sharex [%s] must be one of %s" %
+                             (sharex, share_values))
         if sharey not in share_values:
-            raise ValueError("sharey [%s] must be one of %s" % \
-                    (sharey, share_values))
+            raise ValueError("sharey [%s] must be one of %s" %
+                             (sharey, share_values))
         if subplot_kw is None:
             subplot_kw = {}
 
@@ -200,12 +200,11 @@ class PyOscopeStatic(object):
         r, c = np.mgrid[:nrows, :ncols]
         r = r.flatten() * ncols
         c = c.flatten()
-        lookup = {
-                "none": np.arange(nplots),
-                "all": np.zeros(nplots, dtype=int),
-                "row": r,
-                "col": c,
-                }
+        lookup = {"none": np.arange(nplots),
+                  "all": np.zeros(nplots, dtype=int),
+                  "row": r,
+                  "col": c,
+                  }
         sxs = lookup[sharex]
         sys = lookup[sharey]
 
@@ -642,8 +641,32 @@ class PyOscopeRealtime(PyOscopeStatic):
 
         Normally does nothing. Overwrite this function instead of modifying
         `run` or `_update`.
+
+        Note that overwriting this function must be done using the
+        `set_callback` method, or else you will not easily be able to access
+        instance variables.
         """
         pass
+
+    @synchronized('lock')
+    def set_callback(self, newfunc):
+        """
+        Monkey-patch the callback function to be replaced by `newfunc`.
+
+        Note that the call signature of `newfunc` must be:
+
+            newfunc(s)
+
+        and instance variables (e.g. `self.data`) are accessed in `newfunc` by
+        `s.<varname>` (e.g. `s.data`). As an example:
+
+            def timestwo(s):
+                s.data = s.data*2
+            rt.set_callback(timestwo)
+
+        would multiply all of the data by 2.
+        """
+        self.callback = MethodType(newfunc, self)
 
     @staticmethod
     def _pass():
