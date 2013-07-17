@@ -34,3 +34,9 @@ columns should be automatically determined and referenced in some
 reasonable way (so measurement-specific names do not need to be used
 if unwanted or do not exist).
 
+Installation
+------------
+
+Install directly from `github` using `pip` with
+
+    pip install git+git://github.com/jlazear/pyoscope.git
