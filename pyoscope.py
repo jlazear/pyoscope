@@ -3,34 +3,59 @@
 """
 pyoscope.py
 jlazear
-2013-07-02
+2013-07-17
 
 Generic oscilloscope-like plotting for visualizing data from
 instruments.
 
-Long description
+See PyOscope class.
 
 Example:
 
-<example code here>
+    rt = PyOscope(f='testdata.txt')
+    rt.data.columns
+    rt.plot('second', ['first', 'third'], legend=True)
 """
-version = 20130702
-releasestatus = 'beta'
+version = 20130717
+releasestatus = 'dev'
 
 import numpy as np
-import pandas as pd
 import matplotlib as mpl
 # mpl.use('wxagg')
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_wxagg import \
-    FigureCanvasWxAgg as FigCanvas, \
-    NavigationToolbar2WxAgg as NavigationToolbar
 import matplotlib.pyplot as plt
 from collections import Iterable
 from types import StringTypes
 import threading
-import time
+from functools import wraps
 from readers import DefaultReader
+
+
+__all__ = ['PyOscope', 'PyOscopeStatic', 'PyOscopeRealtime']
+
+
+def synchronized(lockname):
+    """
+    A decorator to place an instance based lock around a method.
+
+    Argument must be string name of lock to be used, e.g.
+
+    class A(object):
+        def __init__(self):
+            lock = threading.RLock()
+
+        @synchronized('lock')
+        def myfunc(self, a):
+            return a**2
+    """
+    def _synched(func):
+        @wraps(func)
+        def _synchronizer(self, *args, **kwargs):
+            tlock = self.__getattribute__(lockname)
+            with tlock:
+                return func(self, *args, **kwargs)
+        return _synchronizer
+    return _synched
 
 
 class PyOscopeStatic(object):
@@ -52,6 +77,12 @@ class PyOscopeStatic(object):
     The desired reader may be specified. The remaining arguments are
     passed to the reader. See reader.ReaderInterface for reader
     implementation notes.
+
+    Example usage:
+
+        >>> pos = PyOscopeStatic(f='testdata.txt')
+        >>> pos.data.columns
+        >>> pos.plot('second', ['first', 'third'], legend=True)
     """
     def __init__(self, f, reader=None, interactive=True, toolbar=True,
                  *args, **kwargs):
@@ -68,12 +99,23 @@ class PyOscopeStatic(object):
         # e.g. if embedding in a separate program.
         self.interactive = interactive
 
+        # Static version is not threaded, but want to make sure any subclasses
+        # are thread-safe
+        self.lock = threading.RLock()
+
+        # Need to keep track of the backend, since not all backends support
+        # all update schemes
+        self._backend = plt.get_backend().lower()
+
         self.fig = self._create_fig(toolbar=toolbar)
+        self.canvas = self.fig.canvas
         self.mode = 'none'
         self._plotdict = {'autoscalex': True,  # Autoscale is meaningless in
                           'autoscaley': True,  # Static, but useful in RT
                           'windowsize': None}
 
+
+    @synchronized('lock')
     def _create_fig(self, plotsize=(6., 4.), dpi=100, tight=True,
                     toolbar=True):
         # autolayout: Automatically call tight_layout() on newly created figure
@@ -94,6 +136,7 @@ class PyOscopeStatic(object):
             # Both cases return the raw Figure object
             return fig
 
+    @synchronized('lock')
     def _create_axes(self, nrows=1, ncols=1, sharex=False, sharey=False,
                      subplot_kw=None, fig=None):
         """
@@ -191,10 +234,12 @@ class PyOscopeStatic(object):
 
         return ret
 
+    @synchronized('lock')
     def redraw(self):
         if self.interactive:
-            self.fig.canvas.draw()
+            self.canvas.draw_idle()
 
+    @synchronized('lock')
     def plot(self, xs=None, ys=None, splitx=True, splity=True, sharex='col',
              sharey=False, xtrans=None, ytrans=None, legend=False, *args,
              **kwargs):
@@ -339,16 +384,19 @@ class PyOscopeStatic(object):
 
         # Create axes for plotting
         if not oneD:
-            lenx = len(xs) if splitx else 1
+            numxs = len(xs)
+            lenx = numxs if splitx else 1
         else:
+            numxs = 1
             lenx = 1
-        leny = len(ys) if splity else 1
+        numys = len(ys)
+        leny = numys if splity else 1
         self.axes = self._create_axes(leny, lenx, sharex=sharex,
                                       sharey=sharey)
 
         # Make plots in appropriate axes
         self.mode = 'plot'
-        self.lines = np.empty([lenx, leny], dtype='object')
+        self.lines = np.empty([numxs, numys], dtype='object')
         if oneD:
             for j, y in enumerate(newys):
                 yname = ynames[j]
@@ -376,8 +424,12 @@ class PyOscopeStatic(object):
                     if legendflag:
                         ax.legend(loc=legendloc)
 
+        if self.interactive:
+            self.fig.show()
+
         return self.lines
 
+    @synchronized('lock')
     def _plotyt(self, ax, y, yname, windowsize=None, transform=None,
                 *args, **kwargs):
         """
@@ -410,6 +462,7 @@ class PyOscopeStatic(object):
         line, = ax.plot(y, label=yname, *args, **kwargs)
         return line
 
+    @synchronized('lock')
     def _plotxy(self, ax, x, y, xname, yname, windowsize=None, xtrans=None,
                 ytrans=None, *args, **kwargs):
         """
@@ -452,6 +505,7 @@ class PyOscopeStatic(object):
         line, = ax.plot(x, y, label=label, *args, **kwargs)
         return line
 
+    @synchronized('lock')
     def clear(self):
         """
         Clears current plot.
@@ -460,7 +514,7 @@ class PyOscopeStatic(object):
         self.mode = 'none'
 
 
-class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
+class PyOscopeRealtime(PyOscopeStatic):
     """
     Object for plotting realtime data sets.
 
@@ -476,68 +530,77 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
     will be running its own event handling loop (the two loops would collide).
     Set to True (default) to use the built-in MPL loop, otherwise False.
 
+    The `interval` argument is the period in milliseconds between update
+    events. Defaults to 500 ms (i.e. 2 Hz). If this period is too short, it
+    may cause instability in the plotter. PyOscopeRealtime will not allow
+    `interval` < 10.
+
     The desired reader may be specified. The remaining arguments are
     passed to the reader. See reader.ReaderInterface for reader
     implementation notes.
+
+    Example usage:
+
+        >>> rt = PyOscopeRealtime(f='testdata.txt')
+        >>> rt.data.columns
+        >>> rt.plot('second', ['first', 'third'], legend=True)
     """
-    def __init__(self, f, reader=None, interactive=True, *args, **kwargs):
+    def __init__(self, f, reader=None, interactive=True, toolbar=True,
+                 interval=500, *args, **kwargs):
         PyOscopeStatic.__init__(self, f=f, reader=reader,
-                                interactive=interactive, toolbar=False,
+                                interactive=interactive, toolbar=toolbar,
                                 *args, **kwargs)
 
         self._update_dict = {'none': self._pass,
                              'plot': self._update_plot}
 
-        # Need to keep track of the backend, since not all backends support
-        # all update schemes
-        self._backend = plt.get_backend().lower()
-
-        # Create a threading.Event to control the thread's existence
-        self.stopped = threading.Event()  # Events default to False
-        self.stopped.set()
-
-        threading.Thread.__init__(self)
         if self.interactive:
-            # Start the thread
-
-            self.stopped.clear()
-            try:
-                self.start()
-            except RuntimeError:
-                pass
+            # Bind update to MPL Idle event
+            interval = max(interval, 10)
+            self.timer = self.canvas.new_timer(interval=interval)
+            self.timer.add_callback(self._update)
+            self.timer.start()
 
     def __del__(self):
         self.stop()
 
     def stop(self):
         if self.interactive:
-            if self.isAlive():
-                self.stopped.set()
-                self.join()
+            # Unbind update function from timer and attempt to stop timer
+            # NOTE: timer.stop() does nothing with macosx backend. This is an
+            # MPL bug. The timer will continue to submit events to the MPL
+            # loop, but with no callbacks they will not trigger anything.
+            self.timer.remove_callback(self._update)
+            self.timer.stop()
         self.close()
 
     def close(self):
         plt.close(self.fig)
         self.reader.close()
 
-    def run(self):
-        while not self.stopped.isSet():
-            try:
-                self._update()
-                time.sleep(0.5)
-            except Exception as e:
-                self.stopped.set()
-                raise e
-        self.close()
-
+    @synchronized('lock')
     def _update(self):
         self.data = self.reader.update_data()
+        self.callback()
         self._update_dict[self.mode]()
+
+    def callback(self):
+        """
+        A custom function that is executed after the data is updated but
+        before the plot is updated.
+
+        Useful if you want to have some custom data handling before plotting.
+
+        Normally does nothing. Overwrite this function instead of modifying
+        `run` or `_update`.
+        """
+        pass
 
     @staticmethod
     def _pass():
         pass
 
+    @synchronized('lock')
     def _update_plot(self):
         update_backend = {'macosx': self._update_plot_slow,
                           'wxagg': self._update_plot_wxagg}
@@ -550,10 +613,16 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
         than a few fps out of this method!
         """
         oneD = self._plotdict['oneD']
-        xs = self._plotdict['xs']
-        ys = self._plotdict['ys']
+        xnames = self._plotdict['xnames']
+        ynames = self._plotdict['ynames']
         xtrans = self._plotdict['xtrans']
         ytrans = self._plotdict['ytrans']
+
+        if not oneD:
+            xs = [self.data[xname] for xname in xnames]
+        else:
+            xs = None
+        ys = [self.data[yname] for yname in ynames]
 
         if oneD:
             for j, y in enumerate(ys):
@@ -569,7 +638,7 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
                     self._update_line_slow(line, x, y, xtran, ytran)
 
         self.autoscale_axes()
-        self.fig.canvas.draw()
+        self.canvas.draw_idle()
 
     def _update_line_slow(self, line, x=None, y=None,
                           xtrans=None, ytrans=None):
@@ -583,6 +652,11 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
         else:
             ws = min(len(y), windowsize)
 
+        if xtrans is None:
+            xtrans = lambda x: x
+        if ytrans is None:
+            ytrans = lambda x: x
+
         if oneD:
             newx = range(len(y))
         else:
@@ -594,8 +668,9 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
         line.set_ydata(newy)
 
     def _update_plot_wxagg(self):
-        self._update_plot_slow() #DELME
+        self._update_plot_slow() #DELME #FIXME
 
+    @synchronized('lock')
     def autoscale_axes(self):
         xflag = self._plotdict['autoscalex']
         yflag = self._plotdict['autoscaley']
@@ -622,10 +697,22 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
                 ymins.append(ymin)
                 ymaxs.append(ymax)
 
-            xmin = min(xmins)
-            xmax = max(xmaxs)
-            ymin = min(ymins)
-            ymax = max(ymaxs)
+            try:
+                xmin = min(xmins)
+            except ValueError:
+                xmin = xminax
+            try:
+                xmax = max(xmaxs)
+            except ValueError:
+                xmax = xmaxax
+            try:
+                ymin = min(ymins)
+            except ValueError:
+                ymin = yminax
+            try:
+                ymax = max(ymaxs)
+            except ValueError:
+                ymax = ymaxax
 
             xmincond = (xmin < xminax) or (xmin > xmidax)
             xmaxcond = (xmax > xmaxax) or (xmax < xmidax)
@@ -637,14 +724,13 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
                 dy = ymax - ymin
                 newxmin = xmin - 0.1*dx
                 newxmax = xmax + 0.1*dx
-                newymin = ymin - 0.1*dx
-                newymax = ymax + 0.1*dx
+                newymin = ymin - 0.1*dy
+                newymax = ymax + 0.1*dy
 
                 if xflag:
                     ax.set_xlim([newxmin, newxmax])
                 if yflag:
                     ax.set_ylim([newymin, newymax])
-
 
     @staticmethod
     def _get_minmax(line):
@@ -669,3 +755,6 @@ class PyOscopeRealtime(PyOscopeStatic, threading.Thread):
             yflag = xflag
         self._plotdict['autoscalex'] = bool(xflag)
         self._plotdict['autoscaley'] = bool(yflag)
+
+# Realtime one is typically expected
+PyOscope = PyOscopeRealtime

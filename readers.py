@@ -19,6 +19,7 @@ releasestatus = 'beta'
 import numpy as np
 import pandas as pd
 from types import StringTypes
+from tempfile import _TemporaryFileWrapper
 
 
 class ReaderInterface(object):
@@ -118,8 +119,12 @@ class DefaultReader(object):
     """
     def __init__(self, f, *args, **kwargs):
         # Load file
-        if isinstance(f, file):
-            self.f = f
+        if isinstance(f, file) or isinstance(f, _TemporaryFileWrapper):
+            mode = self.f.mode
+            if ('r' in mode) or ('+' in mode):
+                self.f = f
+            else:
+                self.f = open(f.name, 'r')
         elif isinstance(f, StringTypes):
             self.f = open(f, 'r')
         else:
@@ -133,6 +138,7 @@ class DefaultReader(object):
     def init_data(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.f.seek(0)
         data = pd.read_csv(self.f, *args, **kwargs)
         # data = np.loadtxt(self.f, *args, **kwargs)
         return data
@@ -155,8 +161,12 @@ class HexReader(object):
     """
     def __init__(self, f, header=True, *args, **kwargs):
         # Load file
-        if isinstance(f, file):
-            self.f = f
+        if isinstance(f, file) or isinstance(f, _TemporaryFileWrapper):
+            mode = f.mode
+            if ('r' in mode) or ('+' in mode):
+                self.f = f
+            else:
+                self.f = open(f.name, 'r')
         elif isinstance(f, StringTypes):
             self.f = open(f, 'r')
         else:

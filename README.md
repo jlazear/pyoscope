@@ -3,6 +3,19 @@ pyoscope
 
 Python generic oscilloscope-like plotter
 
+pyoscope.py
+jlazear
+2013-07-17
+
+Generic oscilloscope-like plotting for visualizing data from
+instruments.
+
+Example:
+
+    rt = PyOscope(f='testdata.txt')
+    rt.data.columns
+    rt.plot('second', ['first', 'third'], legend=True)
+
 Basic Idea
 ----------
 
@@ -20,3 +33,4 @@ names, or be passed in a dictionary with this information. Numbers of
 columns should be automatically determined and referenced in some
 reasonable way (so measurement-specific names do not need to be used
 if unwanted or do not exist).
+
