@@ -114,6 +114,18 @@ class PyOscopeStatic(object):
                           'autoscaley': True,  # Static, but useful in RT
                           'windowsize': None}
 
+    @synchronized('lock')
+    def switch_file(self, newfile, *args, **kwargs):
+        """
+        Switch the file that is used for plotting.
+        """
+        self.clear()
+        self.data = self.reader.switch_file(newfile, *args, **kwargs)
+        try:
+            return self._plot_from_dict()
+        except ValueError:
+            self.redraw()
+            return
 
     @synchronized('lock')
     def _create_fig(self, plotsize=(6., 4.), dpi=100, tight=True,
@@ -378,6 +390,10 @@ class PyOscopeStatic(object):
         self._plotdict['ynames'] = ynames
         self._plotdict['xtrans'] = xtrans
         self._plotdict['ytrans'] = ytrans
+        self._plotdict['splitx'] = splitx
+        self._plotdict['splity'] = splity
+        self._plotdict['sharex'] = sharex
+        self._plotdict['sharey'] = sharey
         self._plotdict['oneD'] = oneD
         self._plotdict['legendflag'] = legendflag
         self._plotdict['legendloc'] = legendloc
@@ -426,8 +442,41 @@ class PyOscopeStatic(object):
 
         if self.interactive:
             self.fig.show()
+            self.redraw()
 
         return self.lines
+
+    @synchronized('lock')
+    def _plot_from_dict(self, pdict=None):
+        if pdict is None:
+            pdict = self._plotdict
+
+        xnames = pdict['xnames']
+        ynames = pdict['ynames']
+        legendflag = pdict['legendflag']
+        legendloc = pdict['legendloc']
+        splitx = pdict['splitx']
+        splity = pdict['splity']
+        sharex = pdict['sharex']
+        sharey = pdict['sharey']
+        xtrans = pdict['xtrans']
+        ytrans = pdict['ytrans']
+
+        nameflag = True
+        for name in (xnames + ynames):
+            flag = (name in self.data.columns)
+            nameflag = (nameflag and flag)
+
+        if not nameflag:
+            raise ValueError("One or more data names not available!")
+
+        if legendloc:
+            legend = legendloc if legendflag else None
+        else:
+            legend = legendflag
+
+        return self.plot(xnames, ynames, splitx, splity, sharex, sharey,
+                         xtrans, ytrans, legend)
 
     @synchronized('lock')
     def _plotyt(self, ax, y, yname, windowsize=None, transform=None,
