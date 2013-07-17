@@ -561,6 +561,109 @@ class PyOscopeStatic(object):
         self.fig.clear()
         self.mode = 'none'
 
+    @synchronized('lock')
+    def autoscale_axes(self):
+        xflag = self._plotdict['autoscalex']
+        yflag = self._plotdict['autoscaley']
+
+        if (not xflag) and (not yflag):
+            return
+
+        for ax in self.axes.flatten():
+            xminax, xmaxax, yminax, ymaxax = ax.axis()
+            dxax = xmaxax - xminax
+            dyax = ymaxax - yminax
+            xmidax = xminax + dxax/2.
+            ymidax = yminax + dyax/2.
+
+            xmins = []
+            xmaxs = []
+            ymins = []
+            ymaxs = []
+
+            for line in ax.lines:
+                xmin, xmax, ymin, ymax = self._get_minmax(line)
+                xmins.append(xmin)
+                xmaxs.append(xmax)
+                ymins.append(ymin)
+                ymaxs.append(ymax)
+
+            try:
+                xmin = min(xmins)
+            except ValueError:
+                xmin = xminax
+            try:
+                xmax = max(xmaxs)
+            except ValueError:
+                xmax = xmaxax
+            try:
+                ymin = min(ymins)
+            except ValueError:
+                ymin = yminax
+            try:
+                ymax = max(ymaxs)
+            except ValueError:
+                ymax = ymaxax
+
+            xmincond = (xmin < xminax) or (xmin > xmidax)
+            xmaxcond = (xmax > xmaxax) or (xmax < xmidax)
+            ymincond = (ymin < yminax) or (ymin > ymidax)
+            ymaxcond = (ymax > ymaxax) or (ymax < ymidax)
+            cond = xmincond or xmaxcond or ymincond or ymaxcond
+            if cond:
+                dx = xmax - xmin
+                dy = ymax - ymin
+                newxmin = xmin - 0.1*dx
+                newxmax = xmax + 0.1*dx
+                newymin = ymin - 0.1*dy
+                newymax = ymax + 0.1*dy
+
+                if xflag:
+                    ax.set_xlim([newxmin, newxmax])
+                if yflag:
+                    ax.set_ylim([newymin, newymax])
+
+    @staticmethod
+    def _get_minmax(line):
+        xdata = line.get_xdata()
+        ydata = line.get_ydata()
+        xmin = min(xdata)
+        xmax = max(xdata)
+        ymin = min(ydata)
+        ymax = max(ydata)
+        return xmin, xmax, ymin, ymax
+
+    def autoscale(self, xflag=True, yflag=None):
+        """
+        Whether or not to autoscale the x or y axis.
+
+        If only `xflag` is specified, then applies to both x and y axes.
+
+        If both `xflag` and `yflag` are specified, then `xflag` sets the
+        x axis autoscaling and `yflag` sets the y axis autoscaling.
+        """
+        if yflag is None:
+            yflag = xflag
+        self._plotdict['autoscalex'] = bool(xflag)
+        self._plotdict['autoscaley'] = bool(yflag)
+
+    def windowsize(self, windowsize=None):
+        """
+        Set the window size.
+
+        The window size is the number of samples from the end of the file that
+        will be plotted, i.e. the last `windowsize` samples will be shown on
+        the plots. As such, it should be an integer.
+
+        A `windowsize` of `None` indicates that the full set of data should be
+        shown. This is the default setting.
+        """
+        try:
+            windowsize = int(windowsize)
+        except ValueError:
+            windowsize = None
+        self._plotdict['windowsize'] = windowsize
+
 
 class PyOscopeRealtime(PyOscopeStatic):
     """
@@ -742,91 +845,7 @@ class PyOscopeRealtime(PyOscopeStatic):
     def _update_plot_wxagg(self):
         self._update_plot_slow() #DELME #FIXME
 
-    @synchronized('lock')
-    def autoscale_axes(self):
-        xflag = self._plotdict['autoscalex']
-        yflag = self._plotdict['autoscaley']
 
-        if (not xflag) and (not yflag):
-            return
-
-        for ax in self.axes.flatten():
-            xminax, xmaxax, yminax, ymaxax = ax.axis()
-            dxax = xmaxax - xminax
-            dyax = ymaxax - yminax
-            xmidax = xminax + dxax/2.
-            ymidax = yminax + dyax/2.
-
-            xmins = []
-            xmaxs = []
-            ymins = []
-            ymaxs = []
-
-            for line in ax.lines:
-                xmin, xmax, ymin, ymax = self._get_minmax(line)
-                xmins.append(xmin)
-                xmaxs.append(xmax)
-                ymins.append(ymin)
-                ymaxs.append(ymax)
-
-            try:
-                xmin = min(xmins)
-            except ValueError:
-                xmin = xminax
-            try:
-                xmax = max(xmaxs)
-            except ValueError:
-                xmax = xmaxax
-            try:
-                ymin = min(ymins)
-            except ValueError:
-                ymin = yminax
-            try:
-                ymax = max(ymaxs)
-            except ValueError:
-                ymax = ymaxax
-
-            xmincond = (xmin < xminax) or (xmin > xmidax)
-            xmaxcond = (xmax > xmaxax) or (xmax < xmidax)
-            ymincond = (ymin < yminax) or (ymin > ymidax)
-            ymaxcond = (ymax > ymaxax) or (ymax < ymidax)
-            cond = xmincond or xmaxcond or ymincond or ymaxcond
-            if cond:
-                dx = xmax - xmin
-                dy = ymax - ymin
-                newxmin = xmin - 0.1*dx
-                newxmax = xmax + 0.1*dx
-                newymin = ymin - 0.1*dy
-                newymax = ymax + 0.1*dy
-
-                if xflag:
-                    ax.set_xlim([newxmin, newxmax])
-                if yflag:
-                    ax.set_ylim([newymin, newymax])
-
-    @staticmethod
-    def _get_minmax(line):
-        xdata = line.get_xdata()
-        ydata = line.get_ydata()
-        xmin = min(xdata)
-        xmax = max(xdata)
-        ymin = min(ydata)
-        ymax = max(ydata)
-        return xmin, xmax, ymin, ymax
-
-    def autoscale(self, xflag=True, yflag=None):
-        """
-        Whether or not to autoscale the x or y axis.
-
-        If only `xflag` is specified, then applies to both x and y axes.
-
-        If both `xflag` and `yflag` are specified, then `xflag` sets the
-        x axis autoscaling and `yflag` sets the y axis autoscaling.
-        """
-        if yflag is None:
-            yflag = xflag
-        self._plotdict['autoscalex'] = bool(xflag)
-        self._plotdict['autoscaley'] = bool(yflag)
 
 # Realtime one is typically expected
 PyOscope = PyOscopeRealtime
