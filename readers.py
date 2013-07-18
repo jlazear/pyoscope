@@ -192,7 +192,10 @@ class HexReader(object):
         while line.startswith('#'):
             line = self.f.readline()
 
-        self.numcols = len(line.split())
+        if 'columns' in self.header:
+            self.numcols = len(self.header['columns'])
+        else:
+            self.numcols = len(line.split())
         self._cdict = {i: self._cfunc for i in range(self.numcols)}
 
     @staticmethod

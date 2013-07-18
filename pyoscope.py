@@ -84,15 +84,20 @@ class PyOscopeStatic(object):
         >>> pos.data.columns
         >>> pos.plot('second', ['first', 'third'], legend=True)
     """
-    def __init__(self, f, reader=None, interactive=True, toolbar=True,
+    def __init__(self, f=None, reader=None, interactive=True, toolbar=True,
                  *args, **kwargs):
         # Read in data
-        if reader is None:
-            self.reader = DefaultReader(f, *args, **kwargs)
-        else:
-            self.reader = reader(f, *args, **kwargs)
+        if f is not None:
+            if reader is None:
+                self.reader = DefaultReader(f, *args, **kwargs)
+            else:
+                self.reader = reader(f, *args, **kwargs)
 
-        self.data = self.reader.init_data(*args, **kwargs)
+            self.data = self.reader.init_data(*args, **kwargs)
+            self._initialized = True
+        else:
+            self.reader = None
+            self._initialized = False
 
         # `interactive` determines if the MPL event loop is used or a
         # raw figure is made. Set to False if using an external event handler,
@@ -115,12 +120,28 @@ class PyOscopeStatic(object):
                           'windowsize': None}
 
     @synchronized('lock')
-    def switch_file(self, newfile, *args, **kwargs):
+    def switch_file(self, newfile, reader=None, *args, **kwargs):
         """
         Switch the file that is used for plotting.
+
+        If no reader is specified, attempts to use pre-existing reader.
+
+        If there is no pre-existing reader, creates a DefaultReader and uses
+        that.
         """
         self.clear()
+        if reader is not None:
+            try:
+                self.reader.close()
+            except AttributeError:
+                pass
+            self.reader = reader(newfile, *args, **kwargs)
+
+        if not self.reader:
+            self.reader = DefaultReader(newfile, *args, **kwargs)
+
         self.data = self.reader.switch_file(newfile, *args, **kwargs)
+        self._initialized = True
         try:
             return self._plot_from_dict()
         except ValueError:
@@ -308,6 +329,9 @@ class PyOscopeStatic(object):
         pyplot.legend()'s `loc` keyword argument. The legend location is
         shared for all axes.
         """
+        if not self._initialized:
+            return
+
         # Argument checking
         # oneD flag indicates if x axis will be indices
         if (xs is None) and (ys is None):
@@ -449,22 +473,30 @@ class PyOscopeStatic(object):
 
     @synchronized('lock')
     def _plot_from_dict(self, pdict=None):
+        if not self._initialized:
+            return
+
         if pdict is None:
             pdict = self._plotdict
 
-        xnames = pdict['xnames']
-        ynames = pdict['ynames']
-        legendflag = pdict['legendflag']
-        legendloc = pdict['legendloc']
-        splitx = pdict['splitx']
-        splity = pdict['splity']
-        sharex = pdict['sharex']
-        sharey = pdict['sharey']
-        xtrans = pdict['xtrans']
-        ytrans = pdict['ytrans']
+        try:
+            xnames = pdict['xnames']
+            ynames = pdict['ynames']
+            legendflag = pdict['legendflag']
+            legendloc = pdict['legendloc']
+            splitx = pdict['splitx']
+            splity = pdict['splity']
+            sharex = pdict['sharex']
+            sharey = pdict['sharey']
+            xtrans = pdict['xtrans']
+            ytrans = pdict['ytrans']
+        except KeyError:
+            raise ValueError("Invalid plot dictionary specified:"
+                             " {0}".format(repr(pdict)))
 
         nameflag = True
-        for name in (xnames + ynames):
+        names = xnames + ynames if xnames else ynames
+        for name in names:
             flag = (name in self.data.columns)
             nameflag = (nameflag and flag)
 
@@ -584,7 +616,10 @@ class PyOscopeStatic(object):
             ymaxs = []
 
             for line in ax.lines:
-                xmin, xmax, ymin, ymax = self._get_minmax(line)
+                try:
+                    xmin, xmax, ymin, ymax = self._get_minmax(line)
+                except ValueError:
+                    return
                 xmins.append(xmin)
                 xmaxs.append(xmax)
                 ymins.append(ymin)
@@ -629,10 +664,14 @@ class PyOscopeStatic(object):
     def _get_minmax(line):
         xdata = line.get_xdata()
         ydata = line.get_ydata()
-        xmin = min(xdata)
-        xmax = max(xdata)
-        ymin = min(ydata)
-        ymax = max(ydata)
+        try:
+            xmin = min(xdata)
+            xmax = max(xdata)
+            ymin = min(ydata)
+            ymax = max(ydata)
+        except ValueError:
+            errmsg = "Line {0} has no data.".format(repr(line))
+            raise ValueError(errmsg)
         return xmin, xmax, ymin, ymax
 
     def autoscale(self, xflag=True, yflag=None):
@@ -698,7 +737,7 @@ class PyOscopeRealtime(PyOscopeStatic):
         >>> rt.data.columns
         >>> rt.plot('second', ['first', 'third'], legend=True)
     """
-    def __init__(self, f, reader=None, interactive=True, toolbar=True,
+    def __init__(self, f=None, reader=None, interactive=True, toolbar=True,
                  interval=500, *args, **kwargs):
         PyOscopeStatic.__init__(self, f=f, reader=reader,
                                 interactive=interactive, toolbar=toolbar,
@@ -733,6 +772,8 @@ class PyOscopeRealtime(PyOscopeStatic):
 
     @synchronized('lock')
     def _update(self):
+        if not self._initialized:
+            return
         self.data = self.reader.update_data()
         self.callback()
         self._update_dict[self.mode]()
