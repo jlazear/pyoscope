@@ -768,7 +768,10 @@ class PyOscopeRealtime(PyOscopeStatic):
 
     def close(self):
         plt.close(self.fig)
-        self.reader.close()
+        try:
+            self.reader.close()
+        except AttributeError:
+            pass
 
     @synchronized('lock')
     def _update(self):
