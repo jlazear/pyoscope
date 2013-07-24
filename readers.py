@@ -136,6 +136,8 @@ class DefaultReader(object):
         self.f.close()
 
     def init_data(self, *args, **kwargs):
+        if self.f.closed:
+            raise ValueError('I/O operation on closed file.')
         self.args = args
         self.kwargs = kwargs
         self.f.seek(0)
@@ -280,6 +282,8 @@ class HexReader(object):
         self.f.close()
 
     def init_data(self, *args, **kwargs):
+        if self.f.closed:
+            raise ValueError('I/O operation on closed file.')
         self.args = args
         self.kwargs = kwargs
         if 'columns' in self.header:

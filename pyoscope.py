@@ -703,6 +703,8 @@ class PyOscopeStatic(object):
             windowsize = int(windowsize)
         except ValueError:
             windowsize = None
+        if windowsize <= 1:  # Would plot a single point
+            windowsize = None
         self._plotdict['windowsize'] = windowsize
 
 
