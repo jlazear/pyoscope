@@ -25,7 +25,7 @@ import matplotlib as mpl
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from collections import Iterable
-from types import StringTypes, MethodType
+from types import StringTypes, MethodType, NoneType
 import threading
 from functools import wraps
 from readers import DefaultReader
@@ -387,6 +387,10 @@ class PyOscopeStatic(object):
                 elif isinstance(x, Iterable):
                     newx = x
                     xname = 'x_{i}'.format(i=i)
+                elif isinstance(x, NoneType):
+                    xname = None
+                    temp = self.data.columns[0]
+                    newx = range(len(self.data[temp]))
                 xnames.append(xname)
                 newxs.append(newx)
         else:
@@ -405,6 +409,10 @@ class PyOscopeStatic(object):
             elif isinstance(y, Iterable):
                 newy = y
                 yname = 'y_{j}'.format(j=j)
+            elif isinstance(x, NoneType):
+                yname = None
+                temp = self.data.columns[0]
+                newy = range(len(self.data[temp]))
             ynames.append(yname)
             newys.append(newy)
 
@@ -550,6 +558,9 @@ class PyOscopeStatic(object):
         if transform is None:
             transform = lambda x: x  # Identity function
 
+        if yname is None:
+            yname = 'index'
+
         y = y[-ws:]
         y = transform(y)
         line, = ax.plot(y, label=yname, *args, **kwargs)
@@ -588,6 +599,11 @@ class PyOscopeStatic(object):
             xtrans = lambda x: x  # Identity function
         if ytrans is None:
             ytrans = lambda x: x  # Identity function
+
+        if xname is None:
+            xname = 'index'
+        if yname is None:
+            yname = 'index'
 
         x = x[-ws:]
         x = xtrans(x)
@@ -853,10 +869,26 @@ class PyOscopeRealtime(PyOscopeStatic):
         ytrans = self._plotdict['ytrans']
 
         if not oneD:
-            xs = [self.data[xname] for xname in xnames]
+            # xs = [self.data[xname] for xname in xnames]
+            xs = []
+            for xname in xnames:
+                if xname is None:
+                    temp = self.data.columns[0]
+                    toadd = np.array(range(len(self.data[temp])))
+                    xs.append(toadd)
+                else:
+                    xs.append(self.data[xname])
         else:
             xs = None
-        ys = [self.data[yname] for yname in ynames]
+        # ys = [self.data[yname] for yname in ynames]
+        ys = []
+        for yname in ynames:
+            if yname is None:
+                temp = self.data.columns[0]
+                toadd = np.array(range(len(self.data[temp])))
+                ys.append(toadd)
+            else:
+                ys.append(self.data[yname])
 
         if oneD:
             for j, y in enumerate(ys):
