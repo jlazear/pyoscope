@@ -423,6 +423,17 @@ class PyOscopeStatic(object):
         self._plotdict['legendflag'] = legendflag
         self._plotdict['legendloc'] = legendloc
 
+        # Abort if nothing to plot along either axis
+        ly = len(ynames)
+        lx = 1 if isinstance(xnames, type(None)) else len(xnames)
+        if lx*ly == 0:
+            self.clear()
+            self.lines = []
+            if self.interactive:
+                self.fig.show()
+                self.redraw()
+            return self.lines
+
         # Create axes for plotting
         if not oneD:
             numxs = len(xs)
