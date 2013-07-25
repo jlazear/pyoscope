@@ -409,7 +409,7 @@ class PyOscopeStatic(object):
             elif isinstance(y, Iterable):
                 newy = y
                 yname = 'y_{j}'.format(j=j)
-            elif isinstance(x, NoneType):
+            elif isinstance(y, NoneType):
                 yname = None
                 temp = self.data.columns[0]
                 newy = range(len(self.data[temp]))
