@@ -113,6 +113,7 @@ class PyOscopeStatic(object):
         self._backend = plt.get_backend().lower()
 
         self.fig = self._create_fig(toolbar=toolbar)
+        self.axes = None
         self.canvas = self.fig.canvas
         self.mode = 'none'
         self._plotdict = {'autoscalex': True,  # Autoscale is meaningless in
