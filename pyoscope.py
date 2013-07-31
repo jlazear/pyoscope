@@ -274,8 +274,8 @@ class PyOscopeStatic(object):
 
     @synchronized('lock')
     def plot(self, xs=None, ys=None, splitx=True, splity=True, sharex='col',
-             sharey=False, xtrans=None, ytrans=None, legend=False, *args,
-             **kwargs):
+             sharey=False, xtrans=None, ytrans=None, legend=False,
+             xlabels=None, ylabels=None, labels=None, *args, **kwargs):
         """
         Make plot.
 
@@ -329,6 +329,20 @@ class PyOscopeStatic(object):
         `legend` indicating where it should be plotted, matching the
         pyplot.legend()'s `loc` keyword argument. The legend location is
         shared for all axes.
+
+        `xlabels` and `ylabels` are display-only labels for the `xs` and `ys`.
+        They are displayed in place of the file-defined labels in legends.
+        They must match the shape of their corresponding data identifiers,
+        `xs` or `ys`. If set to None, then the column labels pulled from the
+        file or assigned by default are used.
+
+        `labels` are display-only labels that override the programmatically
+        generated labels. No pre-formatting is done on this argument, so it
+        must be specified correctly. For 1D arrays of plots (i.e. only `xs` or
+        `ys` is specified), then `labels` must be a 1D list of matching
+        length. For 2D arrays of plots (i.e. both `xs` and `ys` are
+        specified), then `labels` must be a 2D array of matching length, where
+        `labels[i, j]` corresponds to (`xs[i]`, `ys[j]`).
         """
         if not self._initialized:
             return
@@ -349,6 +363,9 @@ class PyOscopeStatic(object):
         if ((not isinstance(xs, Iterable))
             or isinstance(xs, StringTypes)):
             xs = [xs]
+        if ((not isinstance(xlabels, Iterable))
+            or isinstance(xlabels, StringTypes)):
+            xlabels = [xlabels]
 
         if xtrans is None:
             xtrans = [None]*len(xs)
@@ -358,6 +375,9 @@ class PyOscopeStatic(object):
         if ((not isinstance(ys, Iterable))
             or isinstance(ys, StringTypes)):
             ys = [ys]
+        if ((not isinstance(ylabels, Iterable))
+            or isinstance(ylabels, StringTypes)):
+            ylabels = [ylabels]
 
         if ytrans is None:
             ytrans = [None]*len(ys)
@@ -422,8 +442,11 @@ class PyOscopeStatic(object):
         self._plotdict['ys'] = newys
         self._plotdict['xnames'] = xnames
         self._plotdict['ynames'] = ynames
+        self._plotdict['xlabels'] = xlabels
+        self._plotdict['ylabels'] = ylabels
         self._plotdict['xtrans'] = xtrans
         self._plotdict['ytrans'] = ytrans
+        self._plotdict['label'] = labels
         self._plotdict['splitx'] = splitx
         self._plotdict['splity'] = splity
         self._plotdict['sharex'] = sharex
@@ -461,11 +484,14 @@ class PyOscopeStatic(object):
         if oneD:
             for j, y in enumerate(newys):
                 yname = ynames[j]
+                ylbl = ylabels[j]
+                ylbl = yname if (ylbl is None) else ylbl
                 ytran = ytrans[j]
+                label = None if (labels is None) else labels[j]
                 rownum = j if splity else 0
                 ax = self.axes[rownum, 0]
-                line = self._plotyt(ax, y, yname, transform=ytran, *args,
-                                    **kwargs)
+                line = self._plotyt(ax, y, ylbl, transform=ytran,
+                                    label=label, *args, **kwargs)
                 self.lines[0, j] = line
                 if legendflag:
                     ax.legend(loc=legendloc)
@@ -473,14 +499,20 @@ class PyOscopeStatic(object):
             for i, x in enumerate(newxs):
                 for j, y in enumerate(newys):
                     xname = xnames[i]
+                    xlbl = xlabels[i]
+                    xlbl = xname if (xlbl is None) else xlbl
                     yname = ynames[j]
+                    ylbl = ylabels[j]
+                    ylbl = yname if (ylbl is None) else ylbl
                     xtran = xtrans[i]
                     ytran = ytrans[j]
+                    label = None if (labels is None) else labels[i][j]
                     rownum = j if splity else 0
                     colnum = i if splitx else 0
                     ax = self.axes[rownum, colnum]
-                    line = self._plotxy(ax, x, y, xname, yname, xtrans=xtran,
-                                        ytrans=ytran, *args, **kwargs)
+                    line = self._plotxy(ax, x, y, xlbl, ylbl, xtrans=xtran,
+                                        ytrans=ytran, label=label,
+                                        *args, **kwargs)
                     self.lines[i, j] = line
                     if legendflag:
                         ax.legend(loc=legendloc)
@@ -502,6 +534,9 @@ class PyOscopeStatic(object):
         try:
             xnames = pdict['xnames']
             ynames = pdict['ynames']
+            xlabels = pdict['xlabels']
+            ylabels = pdict['ylabels']
+            labels = pdict['labels']
             legendflag = pdict['legendflag']
             legendloc = pdict['legendloc']
             splitx = pdict['splitx']
@@ -529,13 +564,15 @@ class PyOscopeStatic(object):
             legend = legendflag
 
         return self.plot(xnames, ynames, splitx, splity, sharex, sharey,
-                         xtrans, ytrans, legend)
+                         xtrans, ytrans, legend, xlabels, ylabels, labels)
 
     @synchronized('lock')
     def _plotyt(self, ax, y, yname, windowsize=None, transform=None,
-                *args, **kwargs):
+                label=None, *args, **kwargs):
         """
         Plot a data set versus its indices on the specified axes.
+
+        `yname` is the label given to the line.
 
         `windowsize` specifies the number of data points to plot. Counts
         from the end. None (default) specifies all. `windowsize`s that
@@ -545,6 +582,11 @@ class PyOscopeStatic(object):
         it is plotted. It must be a vectorized function, i.e. it must accept
         as its only argument the full data set and return the full transformed
         data set.
+
+        `label` overrides the programmatically generated label for the line.
+        Since the label for this line is directly set to `yname` in this case,
+        this function is redundant. The `label` argument is included to keep
+        its notation similar to _plotxy.
 
         The remaining arguments are passed to `ax.plot`.
 
@@ -562,16 +604,21 @@ class PyOscopeStatic(object):
         if yname is None:
             yname = 'index'
 
+        plabel = yname if (label is None) else label
+
         y = y[-ws:]
         y = transform(y)
-        line, = ax.plot(y, label=yname, *args, **kwargs)
+        line, = ax.plot(y, label=plabel, *args, **kwargs)
         return line
 
     @synchronized('lock')
     def _plotxy(self, ax, x, y, xname, yname, windowsize=None, xtrans=None,
-                ytrans=None, *args, **kwargs):
+                ytrans=None, label=None, *args, **kwargs):
         """
         Plot two data sets against each other on the specified axes.
+
+        `xname` and `yname` are combined to create a label for the plot. This
+        label may be overridden by the `label` argument.
 
         `windowsize` specifies the number of data points to plot. Counts
         from the end. None (default) specifies all. `windowsize`s that
@@ -582,6 +629,9 @@ class PyOscopeStatic(object):
         must accept as its only argument a full data set and return the full
         transformed data set. `xtrans` modifies the x data set and `ytrans`
         modifies the y data set.
+
+        `label` overrides the programmatically generated label for the line.
+        If `label` is not None, then xname and yname are ignored.
 
         The remaining arguments are passed to `ax.plot`.
 
@@ -611,8 +661,10 @@ class PyOscopeStatic(object):
         y = y[-ws:]
         y = ytrans(y)
 
-        label = "{x} (x) vs {y} (y)".format(x=xname, y=yname)
-        line, = ax.plot(x, y, label=label, *args, **kwargs)
+        plabel = "{x} (x) vs {y} (y)".format(x=xname, y=yname)
+        plabel = plabel if (label is None) else label
+
+        line, = ax.plot(x, y, label=plabel, *args, **kwargs)
         return line
 
     @synchronized('lock')
