@@ -1,0 +1,61 @@
+#!/bin/env python
+
+"""
+pyoscope.py
+jlazear
+2013-07-02
+
+Generic oscilloscope-like plotting for visualizing data from
+instruments.
+
+Long description
+
+Example:
+
+<example code here>
+"""
+version = 20130702
+releasestatus = 'beta'
+
+from numpy import *
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import threading
+import time
+from readers import DefaultReader
+
+
+class PyOscopeStatic(object):
+    """
+    Object for plotting static data sets.
+
+    Requires the file `f` to be specified.
+
+    The desired reader may be specified. The remaining arguments are
+    passed to the reader.
+
+    A reader must implement the following methods:
+
+        reader.init_data(f, *args, **kwargs)
+            - Intial read of data
+            - Returns a single numpy array with the data in columns.
+              May be a structured array or Pandas DataFrame.
+        reader.update_data()
+            - Reads changes to the data file
+            - Returns a single updated numpy/pandas array.
+            - Note that this does not necessarily require making a new
+              array. init_data may return a reference to an array that
+              reader owns, then update_data could update the same
+              array, and update_data could return a reference to the
+              same array.
+        reader.switch_file(f, *args, **kwargs)
+            - Switches which file is being read.
+    """
+    def __init__(self, f, reader=None, *args, **kwargs):
+        # Read in data
+        if reader is None:
+            self.reader = DefaultReader(*args, **kwargs)
+        else:
+            self.reader = reader(*args, **kwargs)
+
+        self.data = self.reader.init_data(f, *args, **kwargs)

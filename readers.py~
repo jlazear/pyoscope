@@ -1,0 +1,38 @@
+#!/bin/env python
+
+"""
+readers.py
+jlazear
+2013-07-02
+
+Readers for pyoscope.
+
+Long description
+
+Example:
+
+<example code here>
+"""
+version = 20130702
+releasestatus = 'beta'
+
+from numpy import *
+
+
+class ReaderBase(object):
+    """
+    A reader "interface". Simply lists the methods that a pyoscope
+    reader must implement.
+    """
+    def __init__(f, *args, **kwargs):
+        pass
+
+    def
+
+class DefaultReader(object):
+    """
+    Default reader for pyoscope. Essentially a wrapper around numpy's
+    loadtxt.
+
+    Like all readers, implements
+    """

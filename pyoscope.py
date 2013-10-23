@@ -365,7 +365,7 @@ class PyOscopeStatic(object):
             xs = [xs]
         if ((not isinstance(xlabels, Iterable))
             or isinstance(xlabels, StringTypes)):
-            xlabels = [xlabels]
+            xlabels = [xlabels]*len(xs)
 
         if xtrans is None:
             xtrans = [None]*len(xs)
@@ -377,7 +377,7 @@ class PyOscopeStatic(object):
             ys = [ys]
         if ((not isinstance(ylabels, Iterable))
             or isinstance(ylabels, StringTypes)):
-            ylabels = [ylabels]
+            ylabels = [ylabels]*len(ys)
 
         if ytrans is None:
             ytrans = [None]*len(ys)
