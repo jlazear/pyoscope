@@ -424,7 +424,7 @@ class PyOscopeStatic(object):
             if isinstance(y, StringTypes):
                 newy = self.data[y]
                 yname = y
-            elif isinstance(y, int):
+            elif isinstance(y, (int, np.integer)):
                 yname = self.data.columns[y]
                 newy = self.data[yname]
             elif isinstance(y, Iterable):
