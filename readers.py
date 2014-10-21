@@ -115,6 +115,8 @@ class DefaultReader(object):
     read_csv. Note that read_csv is a little funky. Check its documentation
     if you are getting unexpected behavior.
 
+    Note: Sets header=None by default, unless overridden.
+
     See ReaderInterface for info on readers.
     """
     def __init__(self, f, *args, **kwargs):
@@ -140,6 +142,8 @@ class DefaultReader(object):
             raise ValueError('I/O operation on closed file.')
         self.args = args
         self.kwargs = kwargs
+        if 'header' not in kwargs:
+            kwargs.update(header=None)
         self.f.seek(0)
         data = pd.read_csv(self.f, *args, **kwargs)
         # data = np.loadtxt(self.f, *args, **kwargs)
